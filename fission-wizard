@@ -1,0 +1,288 @@
+#!/usr/bin/bash
+
+#################### Colors
+RED="\e[31m"
+GREEN="\e[32m"
+YELLOW="\e[33m"
+ENDCOLOR="\e[0m"
+####################
+
+clear
+export INITIAL_DIR=$PWD
+export THE_DEPLOY_HAS_ALREADY_BEEN_RUN=false
+
+export BASE_LOG_FOLDER="deploy_logs"
+[ ! -d $BASE_LOG_FOLDER ] && mkdir $BASE_LOG_FOLDER
+LOG_FOLDER="$(date +"%F_%H-%M-%S")"
+export LOG_FOLDER
+mkdir "$BASE_LOG_FOLDER/$LOG_FOLDER" ||
+{ echo "INITIALIZING ERROR - Log folder already created (run only one instance of the script per folder)"; exit; }
+
+function get_center_position_x() {
+  local STR_LENGTH="$1"
+  local COLUMS=$(tput cols)
+  local PRINT_X=$(( (COLUMS - STR_LENGTH) / 2 ))
+  if (( PRINT_X < 0 )); then PRINT_X=0; fi
+  echo $PRINT_X
+}
+
+function get_center_position_y() {
+  local NUMBER_OF_LINES="$1"
+  local LINES=$(tput lines)
+  local PRINT_Y=$(( (LINES - NUMBER_OF_LINES) / 2 ))
+  if (( PRINT_Y < 0 )); then PRINT_Y=0; fi
+  echo $PRINT_Y
+}
+
+function print_line_in_position() {
+  local X="$1"
+  local Y="$2"
+  local STRING="$3"
+  tput cup "$Y" "$X"
+  printf "$STRING"
+}
+
+function print_lines_in_position() {
+  local X="$1"
+  local Y="$2"
+  local STRING="$3"
+  local SEPARATOR="$4"
+  function new_line() {
+    Y=$(( Y + 1 ))
+  }
+  local OLD_IFS="$IFS"
+  IFS="$SEPARATOR"
+  read -ra STR_ARRAY <<< "$STRING"
+  ITERATION=0
+  for STR in "${STR_ARRAY[@]}"; do
+      tput cup "$Y" "$X"
+      printf "$STR"
+      new_line
+      ITERATION=$(( ITERATION + 1 ))
+  done
+  IFS="$OLD_IFS"
+}
+
+
+function show_initialize_message() {
+  local COLUMS=$(tput cols)
+  local LINES=$(tput lines)
+  local PRINT_X=$(( (COLUMS - 107) / 2 ))
+  local PRINT_Y=$(( (LINES - 26) / 4 ))
+  if (( PRINT_X < 0 )); then
+    PRINT_X=0
+  fi
+  if (( PRINT_Y < 0 )); then
+    PRINT_Y=0
+  fi
+  INIT_MESSAGE="ICAgICAgICAgICAgICAgICAgICAgICAsLS0tLk4gICAgICAgICAgICAgICAgICAgICAgIC8gICAgfE4gICAgICAgICAgICAgICAgICAgICAgLyAgICAgfE4gICAgICAgICAgICAgICAgICAgICAvICAgICAgfE4gICAgICAgICAgICAgICAgICAgIC8gICAgICAgfE4gICAgICAgICAgICAgICBfX18sJyAgICAgICAgfE4gICAgICAgICAgICAgPCAgLScgICAgICAgICAgOk4gICAgICAgICAgICAgIGAtLl9fLi4tLSdgYC0sX1xfTiAgICAgICAgICAgICAgICAgfG8vIGAgOiwuKV9gPiAgICAgICAgICAgIF8gXyAgICAgICBfICBfICAgICAgICAgICBfICAgICAgICAgICAgICAgICAgICAgICAgX04gICAgICAgICAgICAgICAgIDovIGAgICAgIHx8LykgICAgICAgICAgIHwgfCB8IF9fXyB8IHx8IHwgX19fICAgIF98IHxfICBfIF8gIF9fXyAgXyBfICBfX18gfCB8IF9fXyAgXyBfTiAgICAgICAgICAgICAgICAgKF8uKS5fXywtYCB8XCAgICAgICAgICAgfCAgIHwvIC5fXXwgfHwgfC8gLiBcICAgIHwgfCAgfCAnX11bX10gfHwgfCB8LyAuX118IHwvIC5fXXwgJ19dIF9OICAgICAgICAgICAgICAgICAvKCBgLmBgICAgYHwgOiAgICAgICAgICB8X3xffFxfX18ufF98fF98XF9fXy8gICAgfF98ICB8X3wgIFtfX198fF9fLyBcX19fLnxffFxfX18ufF98ICB8L04gICAgICAgICAgICAgICAgICdgLS4pICBgICA7IDsgICAgICAgICAgIF8gICAgICAgICAgICBfICAgIF8gICAgICAgICAgICAgIF9fX04gICAgICAgICAgICAgICAgIHwgYCAgICAgICAvLTwgICAgICAgICAgfCB8IF9fXyAgX19fIHwgfF9fW19dIF8gXyAgX19fICAgfCB8ICAgX19fICBfIF8gICAgXyBfICBfX18gIF8gXyBfTiAgICAgICAgICAgICAgICAgfCAgICAgYCAgLyAgIGAuICAgICAgICB8IHwvIC4gXC8gLiBcfCAvIC98IHx8ICcgfC8gLiB8ICB8IHwtIC8gLiBcfCAnX10gIHwgJyB8LyAuX118IHwgfCB8TiAsLV8tLi5fX19fICAgICAvfCAgYCAgICA6X18uLi0nXCAgICAgICB8X3xcX19fL1xfX18vfF9cX1x8X3x8X3xffFxfLiB8ICB8X3wgIFxfX18vfF98ICAgIHxffF98XF9fXy58X18vXy9OLywnLS5fX1wgIGBgLS4vIDpgICAgICAgOyAgICAgICBcICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgW19fX3xOYFwgYFwgIGBcICBcIDogICggICBgICAvICAsICAgYC4gXCAgICAgICAgICAgICAgICAgICAgICAgXyAgICAgICAgICAgIF8gICAgICAgICAgICAgICAgIF9fX04gIFxgIFwgICBcICAgfCAgfCBgICAgOiAgOiAgICAgLlwgXCAgICAgICAgICAgICAgICAgICAgX3wgfCBfX18gIF9fXyB8IHwgX19fICBfIF8gIF9fXyBbXy4gXU4gICBcIGBcXyAgKSkgIDogIDsgICAgIHwgIHwgICAgICApOiA6ICAgICAgICAgICAgICAgICAvIC4gfC8gLl9dfCAuIFx8IHwvIC4gXHwgfCB8W18tWyAgL18vTiAgKGAtLi0nXCB8fCAgfFwgXCAgIGAgOyAgOyAgICAgICB8IHwgICAgICAgICAgICAgICAgIFxfX198XF9fXy58ICBfL3xffFxfX18vIFwgIHwvX18vICBbX11OICAgXC1fICAgYDs7Ll8gICAoIGAgIC8gIC9fICAgICAgIHwgfCAgICAgICAgICAgICAgICAgICAgICAgICAgIHxffCAgICAgICAgICAgW19fL04gICAgYC0uLS4vLyAsJ2AtLl9cX18vXywnICAgICAgICAgOyB8TiAgICAgICBcOjogOiAgICAgLyAgICAgYCAgICAgLCAgIC8gIHxOICAgICAgICB8fCB8ICAgICggICAgICAgICwnIC8gICAvICAgfE4gICAgICAgIHx8ICAgICAgICAgICAgICAgICwnICAgLyAgICB8Tg=="
+  INIT_MESSAGE=$(base64 -d <<< $INIT_MESSAGE)
+  print_lines_in_position "$PRINT_X" "$PRINT_Y" "${INIT_MESSAGE}" "N"
+}
+
+function create_new_log_folder() {
+  LOG_FOLDER="$(date +"%F_%H-%M-%S")"
+  mkdir "$BASE_LOG_FOLDER/$LOG_FOLDER" ||
+  { echo "ERROR - Failed to create new log folder"; exit; }
+}
+
+function show_run_info() {
+  echo "SPECS FOLDER: ${SPECS_DIR}|LOGS IN: ./${BASE_LOG_FOLDER}/${LOG_FOLDER}"
+}
+
+function get_script_options() {
+  print_lines_in_position 4 2 "$(show_run_info)" "|"
+  local PRINT_X=$(get_center_position_x 78)
+  local PRINT_Y=$(get_center_position_y 11)
+
+  function new_line() {
+    PRINT_Y=$(( PRINT_Y + 1 ))
+  }
+  new_line; print_line_in_position "$PRINT_X" "$PRINT_Y" " →  What do you want to do?\n"
+  new_line; print_line_in_position "$PRINT_X" "$PRINT_Y" "    1 - Deploy all fissions in this folder."
+  new_line; print_line_in_position "$PRINT_X" "$PRINT_Y" "    2 - Destroy all fissions in this folder."
+  new_line; print_line_in_position "$PRINT_X" "$PRINT_Y" "    "
+  new_line; print_line_in_position "$PRINT_X" "$PRINT_Y" "    3 - Destroy all fissions and deploy them."
+  new_line; print_line_in_position "$PRINT_X" "$PRINT_Y" "    "
+  new_line; print_line_in_position "$PRINT_X" "$PRINT_Y" "    4 - Change specs folder."
+  new_line; print_line_in_position "$PRINT_X" "$PRINT_Y" "    "
+  new_line; print_line_in_position "$PRINT_X" "$PRINT_Y" "    q - Quit (exit the program or the deployment monitoring)\n\n"
+
+  local OPTION
+  read -rsn1 OPTION
+  export CURRENT_OPTION="$OPTION"
+}
+
+function get_specs_folder() {
+  show_initialize_message
+  local PRINT_X=$(get_center_position_x 100)
+  PRINT_X=$(( PRINT_X))
+  printf "\n\n\n\n%${PRINT_X}s →  Which specs folder should be applied? "
+  read -r SPECS_DIR
+  export SPECS_DIR
+  tput clear
+  tput civis
+}
+
+function update_specs_folder() {
+  tput clear
+  tput cnorm
+  printf "\n →  Which specs folder should be applied? "
+  read -r NEW_SPECS_DIR
+  SPECS_DIR="$NEW_SPECS_DIR"
+  tput clear
+  tput civis
+}
+
+function verify_deploy() {
+  local TOTAL_FISSIONS_DEPLOYED="$1"
+  local VERIFICATION_FOLDER="$INITIAL_DIR/$BASE_LOG_FOLDER/$LOG_FOLDER/"
+  local VERIFICATION_MESSAGE="LOGS IN: ${VERIFICATION_FOLDER}|FISSIONS DEPLOYED: ${TOTAL_FISSIONS_DEPLOYED}"
+  cd "$VERIFICATION_FOLDER" || { echo "ERROR - Failed to go to logs folder."; exit 2; }
+  local SUCCESS_MESSAGE="Status:      succeeded"
+
+  local INITIAL_Y=$(( $(get_center_position_y "$TOTAL_FISSIONS_DEPLOYED") - 6 ))
+  local INDENTATION="  "
+  if (( INITIAL_Y < 6 )); then INITIAL_Y=6; fi
+
+  while true; do
+    DEPLOYMENT_STATUS_MESSAGE=""
+
+    for FISSION in */; do
+        LOG_CONTENT=$(cat "${FISSION}deploy_log.txt")
+
+        if [[ "$LOG_CONTENT" == *"${SUCCESS_MESSAGE}"* ]]; then
+            message="${INDENTATION}${GREEN} [  SUCCESS  ]   ${FISSION} ${ENDCOLOR}\n"
+            DEPLOYMENT_STATUS_MESSAGE="${DEPLOYMENT_STATUS_MESSAGE}${message}"
+        elif [[ "$LOG_CONTENT" == *"Error"* ]]; then
+            message="${INDENTATION}${RED} [   ERROR   ]   ${FISSION}  →  Unexpected error ${ENDCOLOR}\n"
+            DEPLOYMENT_STATUS_MESSAGE="${DEPLOYMENT_STATUS_MESSAGE}${message}"
+        elif [[ "$LOG_CONTENT" == *"lost connection to pod"* ]]; then
+            message="${INDENTATION}${RED} [   ERROR   ]   ${FISSION}  →  Lost connection to pod ${ENDCOLOR}\n"
+            DEPLOYMENT_STATUS_MESSAGE="${DEPLOYMENT_STATUS_MESSAGE}${message}"
+        elif [[ "$LOG_CONTENT" == *"Validation Successful"* ]]; then
+            message="${INDENTATION}${YELLOW} [ VALIDATED ]   ${FISSION} ${ENDCOLOR}\n"
+            DEPLOYMENT_STATUS_MESSAGE="${DEPLOYMENT_STATUS_MESSAGE}${message}"
+        else
+            message="${INDENTATION}${YELLOW} [  WAITING  ]   ${FISSION} ${ENDCOLOR}\n"
+            DEPLOYMENT_STATUS_MESSAGE="${DEPLOYMENT_STATUS_MESSAGE}${message}"
+        fi
+    done
+
+    tput clear
+    print_lines_in_position 4 1 "$VERIFICATION_MESSAGE" "|"
+    print_line_in_position "$(get_center_position_x 27)" 4 "VERIFYING DEPLOYMENT STATUS"
+    tput cup "$INITIAL_Y" 0
+    printf "$DEPLOYMENT_STATUS_MESSAGE"
+
+    read -rs -t 0.1 -n 1 DEPLOY_ALL_COMMAND
+    if [[ "$DEPLOY_ALL_COMMAND" == "q" ]]; then
+        cd "$INITIAL_DIR" || exit 2
+        tput clear
+        break
+    fi
+  done
+}
+
+function deploy_all_fissions() {
+  if [ "$THE_DEPLOY_HAS_ALREADY_BEEN_RUN" = false ] ; then
+    create_new_log_folder
+  else
+    THE_DEPLOY_HAS_ALREADY_BEEN_RUN=true
+  fi
+
+  TOTAL_FISSIONS_DEPLOYED=0
+  for DIRECTORY in */;do
+      [ -L "${DIRECTORY%/}" ] && continue
+      [ "$DIRECTORY" == "$BASE_LOG_FOLDER/" ] && continue
+
+      export FISSION_COMMAND="fission spec apply --specdir=$SPECS_DIR --wait"
+      export LOG_DIR="$BASE_LOG_FOLDER/$LOG_FOLDER/$DIRECTORY"
+      [ ! -d "$LOG_DIR" ] && mkdir "$LOG_DIR"
+
+      DEPLOY_MESSAGE="$(
+      cd ${DIRECTORY} || exit 2
+      ${FISSION_COMMAND} |& tee ${INITIAL_DIR}'/'${LOG_DIR}'deploy_log.txt';
+      )" &
+
+      TOTAL_FISSIONS_DEPLOYED=$((1 + TOTAL_FISSIONS_DEPLOYED))
+  done
+
+  verify_deploy "$TOTAL_FISSIONS_DEPLOYED"
+}
+
+function destroy_all_fissions() {
+  tput clear
+  local FISSIONS_DESTROYED_MSG=""
+
+  TOTAL_FISSIONS_DESTROYED=0
+  for DIRECTORY in */;do
+      [ -L "${DIRECTORY%/}" ] && continue
+      [ "$DIRECTORY" == "$BASE_LOG_FOLDER/" ] && continue
+
+      export FISSION_COMMAND="fission spec destroy --specdir=$SPECS_DIR"
+      export LOG_DIR="$BASE_LOG_FOLDER/$LOG_FOLDER/$DIRECTORY"
+      [ ! -d "$LOG_DIR" ] && mkdir "$LOG_DIR"
+
+      FISSIONS_DESTROYED_MSG="${FISSIONS_DESTROYED_MSG}\n    Directory: ${DIRECTORY}"
+
+      DESTROY_MESSAGE="$(
+      cd ${DIRECTORY} || exit 2
+      ${FISSION_COMMAND} |& tee ${INITIAL_DIR}'/'${LOG_DIR}'destroy_log.txt';
+      )" &
+
+      TOTAL_FISSIONS_DESTROYED=$((1 + $TOTAL_FISSIONS_DESTROYED))
+  done
+
+  local VERIFICATION_FOLDER="$INITIAL_DIR/$BASE_LOG_FOLDER/$LOG_FOLDER/"
+  local VERIFICATION_MESSAGE="LOGS IN: ${VERIFICATION_FOLDER}|FISSIONS DESTROYED: ${TOTAL_FISSIONS_DESTROYED}"
+  print_lines_in_position 4 1 "$VERIFICATION_MESSAGE" "|"
+  local INITIAL_Y=$(( $(get_center_position_y "$TOTAL_FISSIONS_DEPLOYED") - 6 ))
+  if (( INITIAL_Y < 6 )); then INITIAL_Y=6; fi
+  print_line_in_position "$(get_center_position_x 19)" 4 "FISSION DESTRUCTION"
+  tput cup "$INITIAL_Y" 0
+  printf "$FISSIONS_DESTROYED_MSG"
+
+  while true; do
+    read -rs -t 0.1 -n 1 DESTROY_OPTION
+    if [[ "$DESTROY_OPTION" == "q" ]]; then
+        cd "$INITIAL_DIR" || exit 2
+        tput clear
+        break
+    fi
+  done
+}
+
+###################################### Main program loop
+get_specs_folder
+get_script_options
+
+while true; do
+  # Commands
+  if [[ "$CURRENT_OPTION" == "q" ]]; then  # Quit command
+      tput clear
+      tput cnorm
+      tput reset
+      cd "$INITIAL_DIR" || exit 2
+      exit 0
+  elif [[ "$CURRENT_OPTION" == "1" ]]; then  # Deploy all command
+    cd "$INITIAL_DIR" || exit 2
+    deploy_all_fissions
+    get_script_options
+  elif [[ "$CURRENT_OPTION" == "2" ]]; then  # Destroy all command
+    cd "$INITIAL_DIR" || exit 2
+    destroy_all_fissions
+    get_script_options
+  elif [[ "$CURRENT_OPTION" == "3" ]]; then  # Destroy and deploy all command
+    cd "$INITIAL_DIR" || exit 2
+    destroy_all_fissions
+    deploy_all_fissions
+    get_script_options
+  elif [[ "$CURRENT_OPTION" == "4" ]]; then  # Change specs folder command
+    cd "$INITIAL_DIR" || exit 2
+    update_specs_folder
+    get_script_options
+  else
+    get_script_options
+  fi
+done
